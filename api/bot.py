@@ -8,24 +8,21 @@ Commands:
   /status — show scanning state and connectivity
   /scan <contract_address> — on-demand safety check for any address
   /help   — list available commands
-
-Security:
-  - Verifies the request is a genuine Telegram webhook update (via bot token in URL).
-  - Owner-only commands check OWNER_TELEGRAM_ID before executing.
 """
 
 import os
-import logging
-import json
-from http.server import BaseHTTPRequestHandler
-
 import sys
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+import logging
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from flask import Flask, request, jsonify
 from bot_lib import redis_client, dexscreener, safety, telegram
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+app = Flask(__name__)
 
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 OWNER_TELEGRAM_ID = os.environ.get("OWNER_TELEGRAM_ID", "")
@@ -42,45 +39,24 @@ HELP_TEXT = (
 )
 
 
-# ---------------------------------------------------------------------------
-# Vercel serverless handler
-# ---------------------------------------------------------------------------
+@app.route("/api/bot", methods=["POST"])
+def bot_webhook():
+    update = request.get_json(silent=True)
+    if not update:
+        return jsonify({"error": "Bad request"}), 400
 
-class handler(BaseHTTPRequestHandler):
-    def do_POST(self):
-        # Read the request body
-        content_length = int(self.headers.get("Content-Length", 0))
-        raw_body = self.rfile.read(content_length) if content_length > 0 else b""
+    try:
+        _dispatch(update)
+    except Exception as exc:
+        logger.error("Unhandled error in _dispatch: %s", exc)
 
-        try:
-            update = json.loads(raw_body)
-        except json.JSONDecodeError:
-            logger.warning("Received non-JSON body from Telegram webhook")
-            self._respond(400, {"error": "Bad request"})
-            return
+    # Always return 200 so Telegram doesn't retry
+    return jsonify({"ok": True}), 200
 
-        # Process the update and always return 200 to Telegram so it doesn't retry
-        try:
-            _dispatch(update)
-        except Exception as exc:
-            logger.error("Unhandled error in _dispatch: %s", exc)
 
-        self._respond(200, {"ok": True})
-
-    def do_GET(self):
-        # Health check / setup confirmation
-        self._respond(200, {"status": "Telegram webhook is ready"})
-
-    def _respond(self, status_code: int, body: dict):
-        payload = json.dumps(body).encode()
-        self.send_response(status_code)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(payload)))
-        self.end_headers()
-        self.wfile.write(payload)
-
-    def log_message(self, fmt, *args):
-        logger.info(fmt, *args)
+@app.route("/api/bot", methods=["GET"])
+def bot_health():
+    return jsonify({"status": "Telegram webhook is ready"}), 200
 
 
 # ---------------------------------------------------------------------------
@@ -88,19 +64,17 @@ class handler(BaseHTTPRequestHandler):
 # ---------------------------------------------------------------------------
 
 def _dispatch(update: dict):
-    """Route an incoming Telegram update to the appropriate handler."""
     message = update.get("message") or update.get("edited_message")
     if not message:
-        return  # Ignore non-message updates (inline queries, etc.)
+        return
 
     chat_id = str(message.get("chat", {}).get("id", ""))
     user_id = str(message.get("from", {}).get("id", ""))
     text = (message.get("text") or "").strip()
 
     if not text.startswith("/"):
-        return  # Ignore non-command messages
+        return
 
-    # Extract command and arguments (strip bot username suffix, e.g. /start@mybot)
     parts = text.split()
     command = parts[0].split("@")[0].lower()
     args = parts[1:]
@@ -126,10 +100,7 @@ def _dispatch(update: dict):
 # ---------------------------------------------------------------------------
 
 def _is_owner(user_id: str) -> bool:
-    """
-    Check if the sender's Telegram user ID matches OWNER_TELEGRAM_ID.
-    Owner-only commands silently do nothing if this returns False.
-    """
+    """Check sender's Telegram user ID against OWNER_TELEGRAM_ID."""
     if not OWNER_TELEGRAM_ID:
         logger.warning("OWNER_TELEGRAM_ID is not set — owner commands are disabled")
         return False
@@ -137,12 +108,9 @@ def _is_owner(user_id: str) -> bool:
 
 
 def _cmd_start(chat_id: str, user_id: str):
-    """Owner-only: enable scanning."""
     if not _is_owner(user_id):
-        # Silently ignore — do not reveal owner status to non-owners
         logger.info("Non-owner %s attempted /start — ignored", user_id)
         return
-
     try:
         redis_client.set_scanning_enabled(True)
         telegram.send_text(
@@ -155,11 +123,9 @@ def _cmd_start(chat_id: str, user_id: str):
 
 
 def _cmd_stop(chat_id: str, user_id: str):
-    """Owner-only: disable scanning."""
     if not _is_owner(user_id):
         logger.info("Non-owner %s attempted /stop — ignored", user_id)
         return
-
     try:
         redis_client.set_scanning_enabled(False)
         telegram.send_text(
@@ -172,17 +138,12 @@ def _cmd_stop(chat_id: str, user_id: str):
 
 
 def _cmd_status(chat_id: str):
-    """Show current scanning state and Redis/Telegram connectivity."""
     lines = ["<b>Robin Token Alert — Status</b>", ""]
-
-    # Check scanning_enabled
     try:
         enabled = redis_client.is_scanning_enabled()
         lines.append(f"🔍 <b>Scanning:</b> {'ON ✅' if enabled else 'OFF ⏸'}")
     except Exception as exc:
         lines.append(f"🔍 <b>Scanning:</b> ❌ Redis error — {exc}")
-
-    # Check alerted count
     try:
         count = redis_client.get_alerted_count()
         if count >= 0:
@@ -191,20 +152,12 @@ def _cmd_status(chat_id: str):
             lines.append("📋 <b>Tokens alerted:</b> ❌ Redis error")
     except Exception as exc:
         lines.append(f"📋 <b>Tokens alerted:</b> ❌ {exc}")
-
-    # Bot token configured
     bot_ok = bool(TELEGRAM_BOT_TOKEN)
     lines.append(f"🤖 <b>Bot token:</b> {'configured ✅' if bot_ok else 'MISSING ❌'}")
-
     telegram.send_text(chat_id, "\n".join(lines))
 
 
 def _cmd_scan(chat_id: str, args: list):
-    """
-    On-demand safety check for a specific contract address.
-    Does NOT touch alerted_tokens — purely informational.
-    Usage: /scan <contract_address>
-    """
     if not args:
         telegram.send_text(
             chat_id,
@@ -214,7 +167,6 @@ def _cmd_scan(chat_id: str, args: list):
 
     contract_address = args[0].strip().lower()
 
-    # Basic sanity check on address format
     if not contract_address.startswith("0x") or len(contract_address) < 10:
         telegram.send_text(
             chat_id,
@@ -224,13 +176,11 @@ def _cmd_scan(chat_id: str, args: list):
 
     telegram.send_text(chat_id, f"🔍 Scanning <code>{contract_address}</code>…")
 
-    # Look up token data from DexScreener
     token = dexscreener.get_token_info(contract_address)
     if token is None:
         telegram.send_text(chat_id, telegram.format_not_found(contract_address))
         return
 
-    # Run safety checks
     try:
         safety_result = safety.run_safety_checks(token)
     except Exception as exc:
@@ -238,5 +188,4 @@ def _cmd_scan(chat_id: str, args: list):
         telegram.send_text(chat_id, f"❌ Safety check failed: {exc}")
         return
 
-    # Send result with inline buttons
     telegram.send_scan_result(chat_id, token, safety_result)

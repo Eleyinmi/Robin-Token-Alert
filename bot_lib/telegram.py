@@ -1,7 +1,6 @@
 """
 Telegram message formatting, inline keyboard construction, and send functions.
-Uses the Bot API directly (no python-telegram-bot library needed for sending —
-we only use it for the webhook handler in bot.py).
+Uses the Bot API directly via HTTP — no third-party library needed.
 """
 
 import os
@@ -114,12 +113,7 @@ def format_scan_result(token: dict, safety_result: dict) -> str:
     but with a slightly different header.
     """
     msg = format_alert(token, safety_result)
-    # Replace the header line to indicate this is an on-demand scan
-    msg = msg.replace(
-        "New Token Alert",
-        "On-Demand Scan Result",
-        1,
-    )
+    msg = msg.replace("New Token Alert", "On-Demand Scan Result", 1)
     return msg
 
 

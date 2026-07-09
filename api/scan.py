@@ -10,11 +10,10 @@ import logging
 import time
 from http.server import BaseHTTPRequestHandler
 
-# Ensure lib/ is importable (Vercel adds the project root to sys.path)
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from lib import redis_client, dexscreener, safety, telegram
+from bot_lib import redis_client, dexscreener, safety, telegram
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

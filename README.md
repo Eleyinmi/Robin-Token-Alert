@@ -1,4 +1,4 @@
-# Robin Token Alert
+# Robin Token Alert 🤖
 
 A Telegram bot that monitors new token launches on Robinhood Chain DEXs every ~2 minutes, runs automated safety checks (honeypot, liquidity, LP lock, holder concentration), and sends alerts with action buttons to a Telegram channel.
 

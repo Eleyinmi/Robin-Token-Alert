@@ -9,15 +9,5 @@
       "src": "api/bot.py",
       "use": "@vercel/python"
     }
-  ],
-  "routes": [
-    {
-      "src": "/api/scan",
-      "dest": "api/scan.py"
-    },
-    {
-      "src": "/api/bot",
-      "dest": "api/bot.py"
-    }
   ]
 }

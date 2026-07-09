@@ -1,0 +1,144 @@
+Build a Telegram bot in Python that continuously monitors new token launches on 
+Robinhood Chain (an Arbitrum-based Layer 2 blockchain) DEXs, runs automated safety 
+checks, and sends alerts with action buttons to a Telegram channel for tokens that 
+pass. Deploys as serverless functions on Vercel, triggered on a tight schedule by 
+GitHub Actions, using Upstash Redis for lightweight state only.
+
+## ARCHITECTURE
+Two serverless HTTP endpoints, no long-running process:
+1. /api/scan - called every 2 minutes by a GitHub Actions scheduled workflow. Each 
+   call: checks if scanning is enabled, discovers ALL new tokens since the last 
+   run (not just one), runs safety checks on each, sends an alert for every one 
+   that passes, then exits. The tight, repeated external trigger is what makes 
+   this feel near-continuous even though each run is short-lived - a token 
+   launching should be caught within about 2 minutes.
+2. /api/bot - a Telegram webhook endpoint that responds to user commands 
+   (/start, /stop, /scan, /status, /help) on demand.
+No sentiment/X/Twitter module - explicitly out of scope.
+
+IMPORTANT: This repo must be a PUBLIC GitHub repository. GitHub Actions minutes 
+are completely free and unlimited on public repos, which is what makes running 
+the scan every 2 minutes sustainable at zero cost (private repos only get 2,000 
+free minutes/month, which a 2-minute schedule would burn through quickly). Do 
+not put any secrets, API keys, or tokens directly in the code - everything 
+sensitive goes through GitHub Actions secrets and Vercel environment variables, 
+since the code itself will be publicly visible.
+
+## TOOLS & SERVICES
+- Language: Python for both endpoints
+- Telegram: python-telegram-bot, configured for WEBHOOK mode (not polling), with 
+  inline keyboard button support
+- Token discovery: DexScreener public API (free, no key) for new Robinhood Chain 
+  pairs
+- Safety checks: Honeypot.is API and/or GoPlus Security API (free) for honeypot 
+  simulation and contract flags
+- State storage: Upstash Redis (free tier), used for exactly two things - see 
+  State Management below. No SQL database, no ORM.
+- Hosting: Vercel, deployed from the public GitHub repo
+- Scheduler: GitHub Actions workflow (schedule trigger, cron expression "*/2 * * * *") 
+  calling /api/scan via HTTP every 2 minutes - do not rely on Vercel's own Cron 
+  Jobs (Hobby plan caps it at once per day, far too infrequent here)
+
+## STATE MANAGEMENT (Upstash Redis - only two keys in this whole project)
+1. "alerted_tokens" - a Redis SET of contract addresses already alerted on. 
+   Checked before alerting to avoid duplicate alerts for the same token across 
+   multiple scan runs. Never stores market cap/liquidity/etc, only the address 
+   itself.
+2. "scanning_enabled" - a single string key, "true" or "false", defaulting to 
+   "true". Checked at the very start of every /api/scan run - if "false", the 
+   function returns immediately and does no work at all (a real pause, not just 
+   muted alerts).
+
+## MODULE 1: Token Discovery
+Call DexScreener's API for newly created Robinhood Chain pairs. For each token 
+extract: contract address (CA), pair address, symbol, name, creation timestamp, 
+current liquidity USD, current market cap USD, and the DexScreener pair URL. 
+Handle the case where a single scan run finds multiple new tokens at once - loop 
+through all of them, don't assume there's only one.
+
+## MODULE 2: Safety Scanner
+For every token not already in "alerted_tokens":
+- Honeypot simulation (Honeypot.is or GoPlus): simulate buy then sell, flag if 
+  sell fails or buy/sell tax exceeds 10%
+- Liquidity check: flag if below a configurable minimum (default $3,000 USD)
+- Liquidity lock check: flag whether LP tokens sit in a burn/lock address vs the 
+  deployer's own wallet
+- Holder concentration: flag if top 10 holders control more than 60% of supply; 
+  if this data isn't available for this chain, mark the check "unavailable" 
+  rather than silently skipping it
+- Compute safety_status: PASS, CAUTION, or FAIL
+- FAIL tokens do not get alerted. CAUTION tokens alert but show exactly which 
+  checks failed. Never present anything as fully "safe" - a fixed DYOR disclaimer 
+  belongs on every alert regardless of status.
+- Add basic rate-limit handling/backoff for the Honeypot/GoPlus calls since the 
+  scan runs frequently (every 2 minutes) - if the API is rate-limited, skip that 
+  token for this run and log it rather than failing the whole batch.
+
+## MODULE 3: Telegram Alert with Buttons
+When a token passes the gate (PASS or CAUTION), send a message to the configured 
+Telegram channel including:
+- Symbol, name, contract address (copyable format)
+- Market cap (USD), liquidity (USD), date/time created
+- Safety status and check-by-check breakdown
+- Fixed disclaimer: "Not financial advice. Automated checks catch known scam 
+  patterns only - always verify independently before trading."
+Attach an inline keyboard with two URL buttons:
+- "View on DexScreener" -> links to the token's DexScreener pair page
+- "Buy on Maestro" -> deep-links into a configured Maestro Telegram bot with the 
+  contract address passed as a start parameter. Make the Maestro bot username and 
+  the exact deep-link URL pattern a configurable constant/env variable (e.g. 
+  MAESTRO_BOT_USERNAME and a URL template like 
+  "https://t.me/{MAESTRO_BOT_USERNAME}?start={contract_address}"), since the exact 
+  parameter format may need adjusting and shouldn't be hardcoded.
+After sending, add the CA to "alerted_tokens".
+
+## MODULE 4: Telegram Bot Commands (webhook-triggered, owner-only where noted)
+- /start - (owner-only) set "scanning_enabled" to "true", confirm scanning is 
+  active
+- /stop - (owner-only) set "scanning_enabled" to "false", confirm scanning is 
+  paused
+- /status - reply with current scanning state (on/off), and confirm bot/Redis 
+  connectivity
+- /scan <contract_address> - run the safety check pipeline on-demand for any 
+  address the user provides and reply with the same formatted breakdown and 
+  buttons; does not touch "alerted_tokens"
+- /help - list available commands
+Owner-only commands should check the sender's Telegram user ID against an 
+OWNER_TELEGRAM_ID environment variable and silently ignore or reject the command 
+if it doesn't match.
+
+## PROJECT STRUCTURE
+- /api/scan.py - scheduled discovery+safety+alert endpoint
+- /api/bot.py - Telegram webhook endpoint handling all commands
+- /lib/dexscreener.py - DexScreener API wrapper
+- /lib/safety.py - honeypot/liquidity/holder check functions
+- /lib/redis_client.py - Upstash Redis connection, alerted-set helpers, and 
+  scanning_enabled get/set helpers
+- /lib/telegram.py - message formatting, inline keyboard construction, and send 
+  functions
+- /vercel.json
+- /.github/workflows/scan-cron.yml - scheduled workflow (every 2 minutes) calling 
+  /api/scan with a shared secret header
+- /README.md - setup steps: required env vars (TELEGRAM_BOT_TOKEN, 
+  TELEGRAM_CHAT_ID, OWNER_TELEGRAM_ID, UPSTASH_REDIS_REST_URL, 
+  UPSTASH_REDIS_REST_TOKEN, HONEYPOT_API_KEY if needed, MAESTRO_BOT_USERNAME, 
+  SCAN_SECRET), a note that this repo must stay public for free unlimited GitHub 
+  Actions minutes, how to register the Telegram webhook against the deployed 
+  Vercel URL, and how to set the GitHub Actions secret used to call /api/scan
+
+## REQUIREMENTS
+- All secrets via environment variables, never hardcoded (critical since the 
+  repo is public)
+- /api/scan only responds to requests carrying the correct SCAN_SECRET header 
+  (sent by the GitHub Actions workflow) - reject anything else
+- Verify Telegram webhook requests are legitimate before processing
+- Handle external API failures and rate limits gracefully (log and skip that 
+  token, don't crash the whole run) - this matters more now given the 2-minute 
+  frequency
+- Clear comments throughout, especially around the Redis toggle logic and the 
+  owner-only command checks, since I'm still learning
+- No SQL database, no ORM, no sentiment/X integration anywhere in this build
+
+Build order: scaffold the project structure and lib/redis_client.py + 
+lib/dexscreener.py first, then lib/safety.py, then /api/scan.py, then 
+lib/telegram.py with the button logic, then /api/bot.py with all commands last.

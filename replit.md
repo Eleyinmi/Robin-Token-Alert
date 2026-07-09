@@ -1,6 +1,6 @@
-# [Project name]
+# Robin Token Alert
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+A Telegram bot that monitors new token launches on Robinhood Chain DEXs every ~2 minutes, runs automated safety checks (honeypot, liquidity, LP lock, holder concentration), and sends alerts with action buttons to a Telegram channel.
 
 ## Run & Operate
 
@@ -19,18 +19,28 @@ _Replace the heading above with the project's name, and this line with one sente
 - Validation: Zod (`zod/v4`), `drizzle-zod`
 - API codegen: Orval (from OpenAPI spec)
 - Build: esbuild (CJS bundle)
+- **Robin Token Alert**: Python serverless functions on Vercel, Upstash Redis, GitHub Actions scheduler
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/robin-token-alert/` — the Python Telegram bot project (Vercel-deployable)
+  - `api/scan.py` — scheduled scan endpoint (called by GitHub Actions every 2 min)
+  - `api/bot.py` — Telegram webhook command handler
+  - `lib/` — redis_client, dexscreener, safety, telegram helpers
+  - `.github/workflows/scan-cron.yml` — 2-minute GitHub Actions schedule
+  - `README.md` — full setup guide (env vars, webhook registration, etc.)
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- Two serverless endpoints instead of a long-running process — keeps costs at zero on Vercel free tier
+- GitHub Actions as the scheduler (not Vercel Cron) — free unlimited minutes on public repos
+- Upstash Redis REST API (not a persistent connection) — safe for serverless cold starts
+- Only two Redis keys: `alerted_tokens` (SET) and `scanning_enabled` (STRING)
+- Repo must be PUBLIC for free unlimited GitHub Actions minutes
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+Users get near-real-time Telegram alerts for new Robinhood Chain token launches that pass automated safety gates. Each alert shows token details, a check-by-check safety breakdown, and inline buttons to view on DexScreener or buy via Maestro.
 
 ## User preferences
 
@@ -38,8 +48,12 @@ _Populate as you build — explicit user instructions worth remembering across s
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- The GitHub repo MUST be public for free unlimited Actions minutes
+- `SCAN_SECRET` must match in both Vercel env vars and GitHub Actions secrets
+- Register the Telegram webhook manually after first deploy (see README)
+- `GOPLUS_CHAIN_ID` defaults to `42161` (Arbitrum) — update if Robinhood Chain has its own GoPlus chain ID
 
 ## Pointers
 
 - See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+- See `artifacts/robin-token-alert/README.md` for full deployment instructions

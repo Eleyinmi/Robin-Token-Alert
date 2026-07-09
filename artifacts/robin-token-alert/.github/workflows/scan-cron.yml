@@ -1,0 +1,43 @@
+# GitHub Actions workflow that calls /api/scan every 2 minutes.
+#
+# IMPORTANT: This repository must be PUBLIC for this workflow to run with
+# free unlimited minutes. Private repos only get 2,000 free minutes/month,
+# which a 2-minute schedule would exhaust quickly.
+#
+# Required GitHub Actions secrets (Settings → Secrets and variables → Actions):
+#   VERCEL_APP_URL  — your deployed Vercel URL, e.g. https://robin-token-alert.vercel.app
+#   SCAN_SECRET     — the same value you set as SCAN_SECRET in Vercel env vars
+
+name: Scan for New Tokens
+
+on:
+  schedule:
+    # Runs every 2 minutes. Note: GitHub Actions has ~1 minute minimum granularity
+    # in practice, so this fires as close to every 2 minutes as GitHub allows.
+    - cron: "*/2 * * * *"
+  # Allow manual trigger from the Actions tab for testing
+  workflow_dispatch:
+
+jobs:
+  scan:
+    name: Trigger token scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - name: Call /api/scan
+        run: |
+          RESPONSE=$(curl -s -o /tmp/scan_response.json -w "%{http_code}" \
+            -X POST \
+            -H "X-Scan-Secret: ${{ secrets.SCAN_SECRET }}" \
+            -H "Content-Type: application/json" \
+            "${{ secrets.VERCEL_APP_URL }}/api/scan")
+
+          echo "HTTP status: $RESPONSE"
+          echo "Response body:"
+          cat /tmp/scan_response.json
+
+          if [ "$RESPONSE" != "200" ]; then
+            echo "ERROR: /api/scan returned HTTP $RESPONSE"
+            exit 1
+          fi

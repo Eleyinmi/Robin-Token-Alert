@@ -1,13 +1,11 @@
 {
   "version": 2,
-  "builds": [
-    {
-      "src": "api/scan.py",
-      "use": "@vercel/python"
+  "functions": {
+    "api/scan.py": {
+      "runtime": "python3.12"
     },
-    {
-      "src": "api/bot.py",
-      "use": "@vercel/python"
+    "api/bot.py": {
+      "runtime": "python3.12"
     }
-  ]
+  }
 }

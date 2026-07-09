@@ -1,0 +1,18 @@
+# Ignore Node.js / TypeScript monorepo files so Vercel uses vercel.json (Python)
+# instead of auto-detecting pnpm and trying to build the Node.js api-server.
+package.json
+pnpm-lock.yaml
+pnpm-workspace.yaml
+.npmrc
+tsconfig.json
+tsconfig.base.json
+node_modules/
+artifacts/
+scripts/
+lib/
+attached_assets/
+.agents/
+.local/
+.replit
+.replitignore
+replit.md

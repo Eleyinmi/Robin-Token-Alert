@@ -235,8 +235,27 @@ def process_commands():
     redis_client.set_update_offset(offset)
 
 
+def _has_social_profile(token: dict) -> bool:
+    """Return True if the token has at least one website or Twitter/X link."""
+    socials = token.get("socials") or {}
+    return bool(socials.get("website") or socials.get("twitter"))
+
+
+def _merge_token_lists(*lists) -> list[dict]:
+    """Merge multiple token lists, deduplicating by contract address (first seen wins)."""
+    seen: set[str] = set()
+    merged: list[dict] = []
+    for tokens in lists:
+        for token in tokens:
+            addr = token.get("contract_address", "")
+            if addr and addr not in seen:
+                seen.add(addr)
+                merged.append(token)
+    return merged
+
+
 def run_scan():
-    from bot_lib import redis_client, dexscreener, safety, telegram as tg
+    from bot_lib import redis_client, gmgn, dexscreener, safety, telegram as tg
 
     scan_enabled = redis_client.is_scanning_enabled()
     watch_enabled = redis_client.is_watch_enabled()
@@ -245,23 +264,42 @@ def run_scan():
         logger.info("Both scanning and watch mode are disabled — skipping")
         return
 
-    new_tokens = dexscreener.get_new_pairs()
-    logger.info("Found %d new token(s)", len(new_tokens))
+    # Try GMGN first (more reliable), fall back to DexScreener
+    gmgn_tokens = gmgn.get_new_pairs()
+    dex_tokens = dexscreener.get_new_pairs()
+
+    # Merge: GMGN results take priority (deduped by contract address)
+    new_tokens = _merge_token_lists(gmgn_tokens, dex_tokens)
+    logger.info("Found %d new token(s) total (gmgn=%d dex=%d)", len(new_tokens), len(gmgn_tokens), len(dex_tokens))
 
     alerted = watch_sent = skipped_duplicate = skipped_fail = skipped_error = 0
 
     for token in new_tokens:
         contract = token["contract_address"]
 
-        # --- Watch mode: send raw launch notification (no safety checks) ---
+        # --- Watch mode: only alert if MC < $10k AND has website or Twitter ---
         if watch_enabled and not redis_client.has_been_watch_alerted(contract):
-            try:
-                sent = tg.send_watch_alert(token)
-                if sent:
+            mc = token.get("market_cap_usd", 0) or 0
+            passes_mc = mc > 0 and mc < 10_000
+            passes_social = _has_social_profile(token)
+            if passes_mc and passes_social:
+                try:
+                    sent = tg.send_watch_alert(token)
+                    if sent:
+                        redis_client.mark_watch_alerted(contract)
+                        watch_sent += 1
+                except Exception as exc:
+                    logger.error("Watch alert error for %s: %s", contract, exc)
+            else:
+                logger.debug(
+                    "Watch skipped %s — mc=$%.0f passes_mc=%s social=%s",
+                    contract, mc, passes_mc, passes_social,
+                )
+                # Still mark as seen so we don't re-evaluate next run
+                try:
                     redis_client.mark_watch_alerted(contract)
-                    watch_sent += 1
-            except Exception as exc:
-                logger.error("Watch alert error for %s: %s", contract, exc)
+                except Exception:
+                    pass
 
         # --- Safety scan mode: run checks and alert only on pass/caution ---
         if not scan_enabled:

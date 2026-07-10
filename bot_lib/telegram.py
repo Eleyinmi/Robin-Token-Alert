@@ -130,27 +130,35 @@ def format_not_found(contract_address: str) -> str:
 
 def build_inline_keyboard(token: dict) -> dict:
     """
-    Build the Telegram inline keyboard with two URL buttons:
+    Build the Telegram inline keyboard with URL buttons:
       - View on DexScreener
+      - View on GMGN
       - Buy on Maestro (deep-link with contract address)
     """
     maestro_url = MAESTRO_DEEP_LINK_TEMPLATE.format(
         bot_username=MAESTRO_BOT_USERNAME,
         contract_address=token["contract_address"],
     )
+    gmgn_url = token.get("gmgn_url") or f"https://gmgn.ai/rbn/token/{token['contract_address']}"
 
     return {
         "inline_keyboard": [
             [
                 {
-                    "text": "📊 View on DexScreener",
+                    "text": "📊 DexScreener",
                     "url": token.get("dexscreener_url", "https://dexscreener.com"),
                 },
+                {
+                    "text": "🟢 GMGN",
+                    "url": gmgn_url,
+                },
+            ],
+            [
                 {
                     "text": "🤖 Buy on Maestro",
                     "url": maestro_url,
                 },
-            ]
+            ],
         ]
     }
 
@@ -173,7 +181,7 @@ def answer_callback_query(callback_query_id, text=""):
 def send_watch_alert(token: dict, chat_id: str = None) -> bool:
     """
     Send a raw launch notification (no safety checks) for watch mode.
-    Shows token name, contract address, liquidity, market cap, and a DexScreener link.
+    Only called for tokens that passed the MC < $10k + social profile filter.
     """
     if not TELEGRAM_BOT_TOKEN:
         return False
@@ -192,6 +200,16 @@ def send_watch_alert(token: dict, chat_id: str = None) -> bool:
     market_cap = f"${token['market_cap_usd']:,.0f}" if token.get("market_cap_usd") else "N/A"
     liquidity = f"${token['liquidity_usd']:,.0f}" if token.get("liquidity_usd") else "N/A"
 
+    socials = token.get("socials") or {}
+    social_parts = []
+    if socials.get("website"):
+        social_parts.append(f'<a href="{socials["website"]}">🌐 Website</a>')
+    if socials.get("twitter"):
+        social_parts.append(f'<a href="{socials["twitter"]}">𝕏 Twitter</a>')
+    if socials.get("telegram"):
+        social_parts.append(f'<a href="{socials["telegram"]}">✈️ Telegram</a>')
+    social_line = "  |  ".join(social_parts) if social_parts else "None"
+
     lines = [
         "🆕 <b>New Launch Detected</b>",
         "",
@@ -201,14 +219,22 @@ def send_watch_alert(token: dict, chat_id: str = None) -> bool:
         f"<b>Market Cap:</b> {market_cap}",
         f"<b>Liquidity:</b> {liquidity}",
         f"<b>Listed:</b> {created_dt or 'Unknown'}",
+        f"<b>Socials:</b> {social_line}",
         "",
         "<i>⚠️ No safety checks run — always verify before trading.</i>",
     ]
 
+    contract = token["contract_address"]
+    dex_url = token.get("dexscreener_url", f"https://dexscreener.com/rbn/{contract}")
+    gmgn_url = token.get("gmgn_url", f"https://gmgn.ai/rbn/token/{contract}")
+
     keyboard = {
-        "inline_keyboard": [[
-            {"text": "📊 DexScreener", "url": token.get("dexscreener_url", f"https://dexscreener.com/rbn/{token['contract_address']}")},
-        ]]
+        "inline_keyboard": [
+            [
+                {"text": "📊 DexScreener", "url": dex_url},
+                {"text": "🟢 GMGN",        "url": gmgn_url},
+            ]
+        ]
     }
 
     return send_text(target, "\n".join(lines), keyboard=keyboard)

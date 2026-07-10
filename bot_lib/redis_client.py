@@ -7,7 +7,78 @@ logger = logging.getLogger(__name__)
 REDIS_REST_URL = os.environ.get("UPSTASH_REDIS_REST_URL", "")
 REDIS_REST_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
 
-def _headers() -> dict:
-    return {"Authorization": f"Bearer {REDIS_REST_TOKEN}"}
 
-def _call(command: list
+def _headers():
+    return {"Authorization": "Bearer " + REDIS_REST_TOKEN}
+
+
+def _call(command):
+    if not REDIS_REST_URL or not REDIS_REST_TOKEN:
+        raise RuntimeError("UPSTASH_REDIS_REST_URL or UPSTASH_REDIS_REST_TOKEN not set")
+    url = REDIS_REST_URL + "/" + "/".join(str(c) for c in command)
+    resp = requests.get(url, headers=_headers(), timeout=5)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def is_scanning_enabled():
+    try:
+        result = _call(["GET", "scanning_enabled"])
+        value = result.get("result")
+        if value is None:
+            return True
+        return value.lower() == "true"
+    except Exception as exc:
+        logger.error("Redis GET scanning_enabled failed: %s", exc)
+        return True
+
+
+def set_scanning_enabled(enabled):
+    try:
+        _call(["SET", "scanning_enabled", "true" if enabled else "false"])
+    except Exception as exc:
+        logger.error("Redis SET scanning_enabled failed: %s", exc)
+        raise
+
+
+def has_been_alerted(contract_address):
+    try:
+        result = _call(["SISMEMBER", "alerted_tokens", contract_address.lower()])
+        return result.get("result") == 1
+    except Exception as exc:
+        logger.error("Redis SISMEMBER failed for %s: %s", contract_address, exc)
+        return True
+
+
+def mark_alerted(contract_address):
+    try:
+        _call(["SADD", "alerted_tokens", contract_address.lower()])
+    except Exception as exc:
+        logger.error("Redis SADD failed for %s: %s", contract_address, exc)
+        raise
+
+
+def get_alerted_count():
+    try:
+        result = _call(["SCARD", "alerted_tokens"])
+        return result.get("result", 0)
+    except Exception as exc:
+        logger.error("Redis SCARD failed: %s", exc)
+        return -1
+
+
+def get_update_offset():
+    try:
+        result = _call(["GET", "telegram_offset"])
+        value = result.get("result")
+        return int(value) if value is not None else 0
+    except Exception as exc:
+        logger.error("Redis GET telegram_offset failed: %s", exc)
+        return 0
+
+
+def set_update_offset(offset):
+    try:
+        _call(["SET", "telegram_offset", str(offset)])
+    except Exception as exc:
+        logger.error("Redis SET telegram_offset failed: %s", exc)

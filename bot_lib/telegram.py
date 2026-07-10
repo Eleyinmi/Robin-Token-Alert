@@ -156,6 +156,31 @@ def build_inline_keyboard(token: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Bot command menu registration
+# ---------------------------------------------------------------------------
+
+def set_bot_commands() -> bool:
+    """Register the bot command menu shown in Telegram's UI."""
+    if not TELEGRAM_BOT_TOKEN:
+        return False
+    url = f"{TELEGRAM_API_BASE}/bot{TELEGRAM_BOT_TOKEN}/setMyCommands"
+    commands = [
+        {"command": "start",  "description": "Enable scanning (owner only)"},
+        {"command": "stop",   "description": "Pause scanning (owner only)"},
+        {"command": "status", "description": "Show scanning status and stats"},
+        {"command": "scan",   "description": "Safety check a contract: /scan 0x..."},
+        {"command": "help",   "description": "Show all commands"},
+    ]
+    try:
+        import json
+        resp = requests.post(url, json={"commands": commands}, timeout=10)
+        return resp.ok
+    except Exception as exc:
+        logger.warning("setMyCommands failed: %s", exc)
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Send functions
 # ---------------------------------------------------------------------------
 
@@ -184,9 +209,9 @@ def send_scan_result(chat_id: str, token: dict, safety_result: dict) -> bool:
     return _send_message(chat_id, text, reply_markup=keyboard)
 
 
-def send_text(chat_id: str, text: str) -> bool:
-    """Send a plain text (HTML-formatted) message to a chat."""
-    return _send_message(chat_id, text)
+def send_text(chat_id: str, text: str, keyboard: dict = None) -> bool:
+    """Send a plain text (HTML-formatted) message to a chat, with optional inline keyboard."""
+    return _send_message(chat_id, text, reply_markup=keyboard)
 
 
 def _send_message(chat_id: str, text: str, reply_markup: dict = None) -> bool:

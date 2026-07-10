@@ -170,17 +170,63 @@ def answer_callback_query(callback_query_id, text=""):
         pass
 
 
+def send_watch_alert(token: dict, chat_id: str = None) -> bool:
+    """
+    Send a raw launch notification (no safety checks) for watch mode.
+    Shows token name, contract address, liquidity, market cap, and a DexScreener link.
+    """
+    if not TELEGRAM_BOT_TOKEN:
+        return False
+
+    target = chat_id or TELEGRAM_CHAT_ID
+    if not target:
+        logger.error("send_watch_alert: no chat_id provided and TELEGRAM_CHAT_ID not set")
+        return False
+
+    import datetime
+    created_dt = ""
+    if token.get("created_at_ms"):
+        dt = datetime.datetime.utcfromtimestamp(token["created_at_ms"] / 1000)
+        created_dt = dt.strftime("%Y-%m-%d %H:%M UTC")
+
+    market_cap = f"${token['market_cap_usd']:,.0f}" if token.get("market_cap_usd") else "N/A"
+    liquidity = f"${token['liquidity_usd']:,.0f}" if token.get("liquidity_usd") else "N/A"
+
+    lines = [
+        "🆕 <b>New Launch Detected</b>",
+        "",
+        f"<b>{token['name']}</b> (<code>{token['symbol']}</code>)",
+        f"<b>CA:</b> <code>{token['contract_address']}</code>",
+        "",
+        f"<b>Market Cap:</b> {market_cap}",
+        f"<b>Liquidity:</b> {liquidity}",
+        f"<b>Listed:</b> {created_dt or 'Unknown'}",
+        "",
+        "<i>⚠️ No safety checks run — always verify before trading.</i>",
+    ]
+
+    keyboard = {
+        "inline_keyboard": [[
+            {"text": "📊 DexScreener", "url": token.get("dexscreener_url", f"https://dexscreener.com/rbn/{token['contract_address']}")},
+        ]]
+    }
+
+    return send_text(target, "\n".join(lines), keyboard=keyboard)
+
+
 def set_bot_commands() -> bool:
     """Register the bot command menu shown in Telegram's UI."""
     if not TELEGRAM_BOT_TOKEN:
         return False
     url = f"{TELEGRAM_API_BASE}/bot{TELEGRAM_BOT_TOKEN}/setMyCommands"
     commands = [
-        {"command": "start",  "description": "Enable scanning (owner only)"},
-        {"command": "stop",   "description": "Pause scanning (owner only)"},
-        {"command": "status", "description": "Show scanning status and stats"},
-        {"command": "scan",   "description": "Safety check a contract: /scan 0x..."},
-        {"command": "help",   "description": "Show all commands"},
+        {"command": "start",   "description": "Enable safety-checked alerts (owner only)"},
+        {"command": "stop",    "description": "Pause safety-checked alerts (owner only)"},
+        {"command": "watch",   "description": "Enable raw launch notifications (all new tokens)"},
+        {"command": "unwatch", "description": "Pause raw launch notifications"},
+        {"command": "status",  "description": "Show scanning and watch mode status"},
+        {"command": "scan",    "description": "Safety check any contract: /scan 0x..."},
+        {"command": "help",    "description": "Show all commands"},
     ]
     try:
         import json

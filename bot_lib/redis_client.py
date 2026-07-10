@@ -21,6 +21,10 @@ def _call(command):
     return resp.json()
 
 
+# ---------------------------------------------------------------------------
+# Safety scan alerts (filtered)
+# ---------------------------------------------------------------------------
+
 def is_scanning_enabled():
     try:
         result = _call(["GET", "scanning_enabled"])
@@ -66,6 +70,51 @@ def get_alerted_count():
         logger.error("Redis SCARD failed: %s", exc)
         return -1
 
+
+# ---------------------------------------------------------------------------
+# Watch mode (raw launch notifications, no safety filter)
+# ---------------------------------------------------------------------------
+
+def is_watch_enabled():
+    try:
+        result = _call(["GET", "watch_enabled"])
+        value = result.get("result")
+        if value is None:
+            return False
+        return value.lower() == "true"
+    except Exception as exc:
+        logger.error("Redis GET watch_enabled failed: %s", exc)
+        return False
+
+
+def set_watch_enabled(enabled):
+    try:
+        _call(["SET", "watch_enabled", "true" if enabled else "false"])
+    except Exception as exc:
+        logger.error("Redis SET watch_enabled failed: %s", exc)
+        raise
+
+
+def has_been_watch_alerted(contract_address):
+    try:
+        result = _call(["SISMEMBER", "watch_alerted_tokens", contract_address.lower()])
+        return result.get("result") == 1
+    except Exception as exc:
+        logger.error("Redis SISMEMBER watch failed for %s: %s", contract_address, exc)
+        return True
+
+
+def mark_watch_alerted(contract_address):
+    try:
+        _call(["SADD", "watch_alerted_tokens", contract_address.lower()])
+    except Exception as exc:
+        logger.error("Redis SADD watch failed for %s: %s", contract_address, exc)
+        raise
+
+
+# ---------------------------------------------------------------------------
+# Telegram update offset
+# ---------------------------------------------------------------------------
 
 def get_update_offset():
     try:

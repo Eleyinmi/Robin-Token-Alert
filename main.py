@@ -12,7 +12,7 @@ OWNER_TELEGRAM_ID = os.environ.get("OWNER_TELEGRAM_ID", "")
 
 WELCOME_TEXT = (
     "👋 <b>Welcome to Robin Token Alert!</b>\n\n"
-    "I monitor new token launches on Robinhood Chain every 2 minutes and run "
+    "I monitor new token launches on Robinhood Chain every minute and run "
     "automated safety checks before sending alerts.\n\n"
     "<b>What I check:</b>\n"
     "✅ Honeypot detection\n"
@@ -22,28 +22,31 @@ WELCOME_TEXT = (
     "<b>Commands:</b>\n"
     "/status — check if scanning is active\n"
     "/scan &lt;address&gt; — safety check any contract\n"
+    "/watch — get notified of ALL new launches (no safety filter)\n"
     "/help — full command list\n\n"
     "<i>Alerts are posted automatically when new tokens pass all checks.</i>"
 )
 
 OWNER_ENABLED_TEXT = (
     "✅ <b>Scanning enabled!</b>\n\n"
-    "I will now scan for new Robinhood Chain tokens every ~2 minutes and send "
+    "I will now scan for new Robinhood Chain tokens every minute and send "
     "alerts here for any that pass safety checks.\n\n"
     "Send /stop to pause at any time."
 )
 
 HELP_TEXT = (
     "<b>Robin Token Alert — Commands</b>\n\n"
-    "/start — Enable scanning (owner only)\n"
-    "/stop — Pause scanning (owner only)\n"
+    "/start — Enable safety-checked alerts (owner only)\n"
+    "/stop — Pause safety-checked alerts (owner only)\n"
+    "/watch — Enable raw launch notifications (all new tokens, no safety checks)\n"
+    "/unwatch — Pause raw launch notifications\n"
     "/status — Show scanning status and stats\n"
-    "/scan &lt;address&gt; — On-demand safety check\n"
+    "/scan &lt;address&gt; — On-demand safety check for any token\n"
     "/help — Show this message\n\n"
-    "<i>Alerts are sent automatically every ~2 minutes for tokens that pass all safety checks.</i>"
+    "<i>Safety alerts: only tokens that pass all checks.\n"
+    "Watch alerts: every new launch, unfiltered — always verify before trading.</i>"
 )
 
-# Inline keyboard shown with /status and /help
 MAIN_KEYBOARD = {
     "inline_keyboard": [
         [
@@ -53,7 +56,6 @@ MAIN_KEYBOARD = {
     ]
 }
 
-# Keyboard shown after enabling/disabling scanning
 SCAN_CONTROL_KEYBOARD = {
     "inline_keyboard": [
         [
@@ -67,6 +69,24 @@ SCAN_RESUME_KEYBOARD = {
     "inline_keyboard": [
         [
             {"text": "▶️ Start scanning", "callback_data": "/start"},
+            {"text": "📊 Status",         "callback_data": "/status"},
+        ]
+    ]
+}
+
+WATCH_CONTROL_KEYBOARD = {
+    "inline_keyboard": [
+        [
+            {"text": "⏸ Stop watching", "callback_data": "/unwatch"},
+            {"text": "📊 Status",        "callback_data": "/status"},
+        ]
+    ]
+}
+
+WATCH_RESUME_KEYBOARD = {
+    "inline_keyboard": [
+        [
+            {"text": "👁 Start watching", "callback_data": "/watch"},
             {"text": "📊 Status",         "callback_data": "/status"},
         ]
     ]
@@ -89,7 +109,6 @@ def get_updates(offset):
 def process_commands():
     from bot_lib import redis_client, dexscreener, safety, telegram as tg
 
-    # Register the bot command menu every run (fast, idempotent)
     tg.set_bot_commands()
 
     offset = redis_client.get_update_offset()
@@ -104,7 +123,6 @@ def process_commands():
         update_id = update.get("update_id", 0)
         offset = update_id + 1
 
-        # Handle callback queries from inline keyboard button taps
         callback = update.get("callback_query")
         if callback:
             chat_id = str(callback.get("message", {}).get("chat", {}).get("id", ""))
@@ -141,17 +159,49 @@ def process_commands():
                 redis_client.set_scanning_enabled(False)
                 tg.send_text(
                     chat_id,
-                    "⏸ <b>Scanning paused.</b>\n\nNo new alerts will be sent until you resume.",
+                    "⏸ <b>Scanning paused.</b>\n\nSafety-checked alerts are stopped. "
+                    "Send /start to resume.\n\n"
+                    "<i>Tip: /watch still works independently for raw launch notifications.</i>",
                     keyboard=SCAN_RESUME_KEYBOARD,
+                )
+
+            elif cmd == "/watch":
+                if not is_owner:
+                    continue
+                redis_client.set_watch_enabled(True)
+                tg.send_text(
+                    chat_id,
+                    "👁 <b>Watch mode enabled!</b>\n\n"
+                    "I will now send a notification for <b>every new token launch</b> "
+                    "on Robinhood Chain — no safety checks, just raw launches.\n\n"
+                    "⚠️ <i>Always do your own research before trading.</i>\n\n"
+                    "Send /unwatch to pause at any time.",
+                    keyboard=WATCH_CONTROL_KEYBOARD,
+                )
+
+            elif cmd == "/unwatch":
+                if not is_owner:
+                    continue
+                redis_client.set_watch_enabled(False)
+                tg.send_text(
+                    chat_id,
+                    "⏸ <b>Watch mode paused.</b>\n\nRaw launch notifications stopped. "
+                    "Send /watch to resume.",
+                    keyboard=WATCH_RESUME_KEYBOARD,
                 )
 
             elif cmd == "/status":
                 lines = ["<b>Robin Token Alert — Status</b>", ""]
                 try:
                     enabled = redis_client.is_scanning_enabled()
-                    lines.append("🔍 Scanning: " + ("ON ✅" if enabled else "OFF ⏸"))
+                    lines.append("🔍 Safety scan: " + ("ON ✅" if enabled else "OFF ⏸"))
                 except Exception as exc:
-                    lines.append("🔍 Scanning: ❌ " + str(exc))
+                    lines.append("🔍 Safety scan: ❌ " + str(exc))
+                try:
+                    watch = redis_client.is_watch_enabled()
+                    lines.append("👁 Watch mode: " + ("ON ✅" if watch else "OFF ⏸"))
+                except Exception as exc:
+                    lines.append("👁 Watch mode: ❌ " + str(exc))
                 try:
                     count = redis_client.get_alerted_count()
                     lines.append("📋 Tokens alerted: " + (str(count) if count >= 0 else "❌"))
@@ -188,17 +238,35 @@ def process_commands():
 def run_scan():
     from bot_lib import redis_client, dexscreener, safety, telegram as tg
 
-    if not redis_client.is_scanning_enabled():
-        logger.info("Scanning is disabled — skipping token scan")
+    scan_enabled = redis_client.is_scanning_enabled()
+    watch_enabled = redis_client.is_watch_enabled()
+
+    if not scan_enabled and not watch_enabled:
+        logger.info("Both scanning and watch mode are disabled — skipping")
         return
 
     new_tokens = dexscreener.get_new_pairs()
     logger.info("Found %d new token(s)", len(new_tokens))
 
-    alerted = skipped_duplicate = skipped_fail = skipped_error = 0
+    alerted = watch_sent = skipped_duplicate = skipped_fail = skipped_error = 0
 
     for token in new_tokens:
         contract = token["contract_address"]
+
+        # --- Watch mode: send raw launch notification (no safety checks) ---
+        if watch_enabled and not redis_client.has_been_watch_alerted(contract):
+            try:
+                sent = tg.send_watch_alert(token)
+                if sent:
+                    redis_client.mark_watch_alerted(contract)
+                    watch_sent += 1
+            except Exception as exc:
+                logger.error("Watch alert error for %s: %s", contract, exc)
+
+        # --- Safety scan mode: run checks and alert only on pass/caution ---
+        if not scan_enabled:
+            continue
+
         if redis_client.has_been_alerted(contract):
             skipped_duplicate += 1
             continue
@@ -237,8 +305,8 @@ def run_scan():
         time.sleep(0.5)
 
     logger.info(
-        "Scan done — alerted=%d duplicates=%d failed_safety=%d errors=%d",
-        alerted, skipped_duplicate, skipped_fail, skipped_error,
+        "Scan done — safety_alerted=%d watch_sent=%d duplicates=%d failed_safety=%d errors=%d",
+        alerted, watch_sent, skipped_duplicate, skipped_fail, skipped_error,
     )
 
 

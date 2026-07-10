@@ -159,6 +159,17 @@ def build_inline_keyboard(token: dict) -> dict:
 # Bot command menu registration
 # ---------------------------------------------------------------------------
 
+def answer_callback_query(callback_query_id, text=""):
+    """Dismiss the loading spinner when an inline button is tapped."""
+    if not TELEGRAM_BOT_TOKEN:
+        return
+    url = f"{TELEGRAM_API_BASE}/bot{TELEGRAM_BOT_TOKEN}/answerCallbackQuery"
+    try:
+        requests.post(url, json={"callback_query_id": callback_query_id, "text": text}, timeout=5)
+    except Exception:
+        pass
+
+
 def set_bot_commands() -> bool:
     """Register the bot command menu shown in Telegram's UI."""
     if not TELEGRAM_BOT_TOKEN:

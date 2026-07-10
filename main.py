@@ -110,6 +110,7 @@ def process_commands():
             chat_id = str(callback.get("message", {}).get("chat", {}).get("id", ""))
             user_id = str(callback.get("from", {}).get("id", ""))
             text = callback.get("data", "")
+            tg.answer_callback_query(callback.get("id", ""))
         else:
             msg = update.get("message") or update.get("edited_message")
             if not msg:

@@ -72,7 +72,7 @@ def get_alerted_count():
 
 
 # ---------------------------------------------------------------------------
-# Watch mode (raw launch notifications, no safety filter)
+# Watch mode (raw launch notifications)
 # ---------------------------------------------------------------------------
 
 def is_watch_enabled():
@@ -95,6 +95,27 @@ def set_watch_enabled(enabled):
         raise
 
 
+def is_watch_filter_enabled():
+    """When True, watch alerts only fire for tokens with MC<10k AND social profile."""
+    try:
+        result = _call(["GET", "watch_filter_enabled"])
+        value = result.get("result")
+        if value is None:
+            return False  # Filter OFF by default
+        return value.lower() == "true"
+    except Exception as exc:
+        logger.error("Redis GET watch_filter_enabled failed: %s", exc)
+        return False
+
+
+def set_watch_filter_enabled(enabled):
+    try:
+        _call(["SET", "watch_filter_enabled", "true" if enabled else "false"])
+    except Exception as exc:
+        logger.error("Redis SET watch_filter_enabled failed: %s", exc)
+        raise
+
+
 def has_been_watch_alerted(contract_address):
     try:
         result = _call(["SISMEMBER", "watch_alerted_tokens", contract_address.lower()])
@@ -109,6 +130,37 @@ def mark_watch_alerted(contract_address):
         _call(["SADD", "watch_alerted_tokens", contract_address.lower()])
     except Exception as exc:
         logger.error("Redis SADD watch failed for %s: %s", contract_address, exc)
+        raise
+
+
+# ---------------------------------------------------------------------------
+# Broadcast channels (multiple Telegram chats/channels)
+# ---------------------------------------------------------------------------
+
+def get_broadcast_channels() -> list[str]:
+    """Return all channel IDs configured to receive alerts."""
+    try:
+        result = _call(["SMEMBERS", "broadcast_channels"])
+        members = result.get("result") or []
+        return [str(m) for m in members]
+    except Exception as exc:
+        logger.error("Redis SMEMBERS broadcast_channels failed: %s", exc)
+        return []
+
+
+def add_broadcast_channel(chat_id: str):
+    try:
+        _call(["SADD", "broadcast_channels", str(chat_id)])
+    except Exception as exc:
+        logger.error("Redis SADD broadcast_channels failed: %s", exc)
+        raise
+
+
+def remove_broadcast_channel(chat_id: str):
+    try:
+        _call(["SREM", "broadcast_channels", str(chat_id)])
+    except Exception as exc:
+        logger.error("Redis SREM broadcast_channels failed: %s", exc)
         raise
 
 

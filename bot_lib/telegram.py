@@ -246,13 +246,16 @@ def set_bot_commands() -> bool:
         return False
     url = f"{TELEGRAM_API_BASE}/bot{TELEGRAM_BOT_TOKEN}/setMyCommands"
     commands = [
-        {"command": "start",   "description": "Enable safety-checked alerts (owner only)"},
-        {"command": "stop",    "description": "Pause safety-checked alerts (owner only)"},
-        {"command": "watch",   "description": "Enable raw launch notifications (all new tokens)"},
-        {"command": "unwatch", "description": "Pause raw launch notifications"},
-        {"command": "status",  "description": "Show scanning and watch mode status"},
-        {"command": "scan",    "description": "Safety check any contract: /scan 0x..."},
-        {"command": "help",    "description": "Show all commands"},
+        {"command": "start",         "description": "Enable safety-checked alerts (owner only)"},
+        {"command": "stop",          "description": "Pause safety-checked alerts (owner only)"},
+        {"command": "watch",         "description": "Enable raw launch notifications"},
+        {"command": "unwatch",       "description": "Pause raw launch notifications"},
+        {"command": "watchfilter",   "description": "Toggle MC<10k + social filter on/off"},
+        {"command": "addchannel",    "description": "Add this chat to alert broadcast list"},
+        {"command": "removechannel", "description": "Remove this chat from broadcast list"},
+        {"command": "status",        "description": "Show full status"},
+        {"command": "scan",          "description": "Safety check any contract: /scan 0x..."},
+        {"command": "help",          "description": "Show all commands"},
     ]
     try:
         import json

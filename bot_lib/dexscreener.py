@@ -12,7 +12,7 @@ import requests
 logger = logging.getLogger(__name__)
 
 DEXSCREENER_BASE = "https://api.dexscreener.com"
-ROBINHOOD_CHAIN_ID = "rbn"
+ROBINHOOD_CHAIN_ID = "robinhood"
 NEW_PAIR_MAX_AGE_SECONDS = 150
 
 

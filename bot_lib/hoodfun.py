@@ -24,7 +24,7 @@ SOURCES = [
             "/api/tokens/new?limit=50",
             "/api/token/list?sort=created&limit=50",
         ],
-        "chain": "rbn",
+        "chain": "robinhood",
     },
     {
         "name": "hood.fun",
@@ -35,7 +35,7 @@ SOURCES = [
             "/api/v1/tokens/latest?limit=50",
             "/api/tokens/new?limit=50",
         ],
-        "chain": "rbn",
+        "chain": "robinhood",
     },
 ]
 

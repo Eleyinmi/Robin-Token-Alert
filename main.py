@@ -417,45 +417,69 @@ def process_commands():
                     except Exception as exc:
                         lines.append(f"GMGN chain '{gchain}': ❌ {exc}")
 
-                # ── 4. fun.noxa.fi — try a few endpoints ──
+                # ── 4. fun.noxa.fi — show raw body to find the real API ──
                 lines.append("")
                 noxa_endpoints = [
                     "/api/tokens?sort=createTime&order=desc&limit=5",
                     "/api/coins?limit=5",
                     "/api/v1/tokens/latest?limit=5",
                     "/api/token/list?limit=5",
+                    "/api/launchpad/tokens?limit=5",
+                    "/api/v1/coins/new?limit=5",
                 ]
                 noxa_found = False
                 for ep in noxa_endpoints:
                     try:
                         r = _req.get("https://fun.noxa.fi" + ep,
-                                     headers={"User-Agent": "Mozilla/5.0"}, timeout=6)
-                        lines.append(f"fun.noxa.fi{ep[:30]}: HTTP {r.status_code}")
-                        if r.ok and r.text.strip().startswith(("{", "[")):
-                            data = r.json()
-                            items = data if isinstance(data, list) else (data.get("tokens") or data.get("coins") or data.get("data") or data.get("items") or [])
-                            lines.append(f"  → {len(items)} item(s) {'✅' if items else ''}")
-                            if items:
-                                noxa_found = True
-                                break
+                                     headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"}, timeout=6)
+                        ct = r.headers.get("Content-Type", "?")
+                        is_json = "json" in ct or r.text.strip()[:1] in ("{", "[")
+                        short_body = r.text.strip()[:120].replace("\n", " ")
+                        lines.append(f"noxa{ep[:28]}: {r.status_code} {'JSON' if is_json else 'HTML'}")
+                        if r.ok and is_json:
+                            try:
+                                data = r.json()
+                                items = data if isinstance(data, list) else (data.get("tokens") or data.get("coins") or data.get("data") or data.get("items") or data.get("result") or [])
+                                lines.append(f"  → {len(items)} item(s) {'✅' if items else '— keys: ' + str(list(data.keys()) if isinstance(data, dict) else [])[:60]}")
+                                if items:
+                                    noxa_found = True
+                                    break
+                            except Exception:
+                                lines.append(f"  → parse failed: {short_body[:80]}")
+                        elif r.ok and not is_json:
+                            lines.append(f"  → HTML: {short_body[:80]}")
                     except Exception as exc:
-                        lines.append(f"fun.noxa.fi{ep[:30]}: ❌ {exc}")
+                        lines.append(f"noxa{ep[:28]}: ❌ {exc}")
                 if not noxa_found:
-                    lines.append("  fun.noxa.fi: no working endpoint found yet")
+                    lines.append("  ↑ All return HTML — noxa.fi is a SPA; real API path unknown")
 
-                # ── 5. hood.fun ──
+                # ── 5. hood.fun — show raw body too ──
                 lines.append("")
-                for ep in ["/api/tokens?sort=createTime&order=desc&limit=5", "/api/coins?limit=5"]:
+                hood_endpoints = [
+                    "/api/tokens?sort=createTime&order=desc&limit=5",
+                    "/api/coins?limit=5",
+                    "/api/v1/tokens?limit=5",
+                    "/api/launchpad/tokens?limit=5",
+                    "/api/token?limit=5",
+                ]
+                for ep in hood_endpoints:
                     try:
                         r = _req.get("https://hood.fun" + ep,
-                                     headers={"User-Agent": "Mozilla/5.0"}, timeout=6)
-                        lines.append(f"hood.fun{ep[:30]}: HTTP {r.status_code}")
-                        if r.ok and r.text.strip().startswith(("{", "[")):
-                            data = r.json()
-                            items = data if isinstance(data, list) else (data.get("tokens") or data.get("coins") or data.get("data") or [])
-                            lines.append(f"  → {len(items)} item(s) {'✅' if items else ''}")
+                                     headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"}, timeout=6)
+                        ct = r.headers.get("Content-Type", "?")
+                        is_json = "json" in ct or r.text.strip()[:1] in ("{", "[")
+                        lines.append(f"hood{ep[:28]}: {r.status_code} {'JSON' if is_json else 'HTML/404'}")
+                        if r.ok and is_json:
+                            try:
+                                data = r.json()
+                                items = data if isinstance(data, list) else (data.get("tokens") or data.get("coins") or data.get("data") or [])
+                                lines.append(f"  → {len(items)} item(s) {'✅' if items else '— keys: ' + str(list(data.keys()) if isinstance(data, dict) else [])[:60]}")
+                                if items:
+                                    break
+                            except Exception:
+                                pass
                     except Exception as exc:
-                        lines.append(f"hood.fun{ep[:30]}: ❌ {exc}")
+                        lines.append(f"hood{ep[:28]}: ❌ {exc}")
 
                 # ── 6. Redis state ──
                 lines.append("")

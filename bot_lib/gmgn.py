@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 GMGN_BASE = "https://gmgn.ai"
 
 # Chain identifier used by GMGN for Robinhood Chain
-GMGN_CHAIN = "rbn"
+GMGN_CHAIN = "robinhood"
 
 # How long a token can be before it's not "new" (seconds)
 NEW_PAIR_MAX_AGE_SECONDS = 150
@@ -38,10 +38,14 @@ def get_new_pairs() -> list[dict]:
             "direction": "desc",
         }
         headers = {
-            "User-Agent": "Mozilla/5.0",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             "Accept": "application/json",
+            "Referer": "https://gmgn.ai/",
         }
         resp = requests.get(url, params=params, headers=headers, timeout=10)
+        if resp.status_code == 403:
+            logger.warning("GMGN returned 403 — likely blocking bot IPs; skipping")
+            return []
         resp.raise_for_status()
         data = resp.json()
     except requests.RequestException as exc:

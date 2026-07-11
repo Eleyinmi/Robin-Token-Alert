@@ -233,7 +233,10 @@ def send_watch_alert(token: dict, chat_id: str = None) -> bool:
             [
                 {"text": "📊 DexScreener", "url": dex_url},
                 {"text": "🟢 GMGN",        "url": gmgn_url},
-            ]
+            ],
+            [
+                {"text": "⏹ Stop alerts", "callback_data": "/unwatch"},
+            ],
         ]
     }
 

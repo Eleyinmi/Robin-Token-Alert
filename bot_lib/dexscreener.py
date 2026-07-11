@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 DEXSCREENER_BASE = "https://api.dexscreener.com"
 ROBINHOOD_CHAIN_ID = "robinhood"
-NEW_PAIR_MAX_AGE_SECONDS = 150
+NEW_PAIR_MAX_AGE_SECONDS = 600
 
 
 def get_new_pairs(since_timestamp: Optional[int] = None) -> list[dict]:

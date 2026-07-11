@@ -11,18 +11,21 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-NEW_PAIR_MAX_AGE_SECONDS = 150
+NEW_PAIR_MAX_AGE_SECONDS = 600
 
 SOURCES = [
     {
         "name": "fun.noxa.fi",
         "base": "https://fun.noxa.fi",
         "endpoints": [
-            "/api/tokens?sort=createTime&order=desc&limit=50",
-            "/api/coins?sort=created&order=desc&limit=50",
-            "/api/v1/tokens/latest?limit=50",
-            "/api/tokens/new?limit=50",
-            "/api/token/list?sort=created&limit=50",
+            # /rh/ prefix — Robinhood Chain slug on noxa.fi
+            "/api/rh/tokens?sort=createTime&order=desc&limit=50",
+            "/api/rh/coins?sort=created&order=desc&limit=50",
+            "/api/tokens?chain=rh&sort=createTime&order=desc&limit=50",
+            "/api/tokens?chain=robinhood&sort=createTime&order=desc&limit=50",
+            "/api/coins?chain=rh&limit=50",
+            "/api/v1/tokens/latest?chain=rh&limit=50",
+            "/rh/api/tokens?sort=createTime&order=desc&limit=50",
         ],
         "chain": "robinhood",
     },
@@ -30,10 +33,12 @@ SOURCES = [
         "name": "hood.fun",
         "base": "https://hood.fun",
         "endpoints": [
-            "/api/tokens?sort=createTime&order=desc&limit=50",
-            "/api/coins?sort=created&order=desc&limit=50",
-            "/api/v1/tokens/latest?limit=50",
-            "/api/tokens/new?limit=50",
+            "/api/rh/tokens?sort=createTime&order=desc&limit=50",
+            "/api/tokens?chain=rh&sort=createTime&order=desc&limit=50",
+            "/api/tokens?chain=robinhood&sort=createTime&order=desc&limit=50",
+            "/api/v1/tokens?limit=50",
+            "/api/coins?limit=50",
+            "/api/token?limit=50",
         ],
         "chain": "robinhood",
     },

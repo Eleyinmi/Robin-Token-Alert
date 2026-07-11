@@ -42,13 +42,16 @@ HELP_TEXT = (
     "<b>Watch mode (all new launches):</b>\n"
     "/watch — Enable raw launch notifications\n"
     "/unwatch — Pause raw launch notifications\n"
-    "/watchfilter — Toggle MC&lt;10k + social filter on/off\n\n"
+    "/watchfilter — Toggle MC range + social filter on/off\n"
+    "/setmc &lt;max&gt; or /setmc &lt;min&gt; &lt;max&gt; — Set MC range\n\n"
     "<b>Channels:</b>\n"
     "/addchannel — Add this chat to broadcast list\n"
     "/removechannel — Remove this chat from broadcast list\n\n"
     "<b>General:</b>\n"
     "/status — Show full status\n"
     "/scan &lt;address&gt; — Safety check any token\n"
+    "/test — Confirm bot can send messages here\n"
+    "/diag — Check token sources + Redis state\n"
     "/help — Show this message"
 )
 
@@ -324,6 +327,68 @@ def process_commands():
                     continue
                 result = safety.run_safety_checks(token)
                 tg.send_scan_result(chat_id, token, result)
+
+            elif cmd == "/test":
+                if not is_owner:
+                    continue
+                import os as _os
+                default_chat = _os.environ.get("TELEGRAM_CHAT_ID", "NOT SET")
+                try:
+                    channels = redis_client.get_broadcast_channels()
+                    ch_list = ", ".join(channels) if channels else "none"
+                except Exception:
+                    ch_list = "error reading"
+                tg.send_text(
+                    chat_id,
+                    f"✅ <b>Bot is alive and responding!</b>\n\n"
+                    f"<b>Your chat ID:</b> <code>{chat_id}</code>\n"
+                    f"<b>TELEGRAM_CHAT_ID env:</b> <code>{default_chat}</code>\n"
+                    f"<b>Extra broadcast channels:</b> {ch_list}\n\n"
+                    f"<i>If TELEGRAM_CHAT_ID does not match your chat ID and you want alerts here, "
+                    f"update the GitHub Actions secret or send /addchannel in this chat.</i>"
+                )
+
+            elif cmd == "/diag":
+                if not is_owner:
+                    continue
+                tg.send_text(chat_id, "🔍 <b>Running source diagnostics…</b>\n\n<i>Checking all token sources. This may take 10–15 seconds.</i>")
+                from bot_lib import hoodfun, gmgn, dexscreener
+                lines = ["<b>Token Source Diagnostics</b>", ""]
+                try:
+                    hood_tokens = hoodfun.get_new_pairs()
+                    lines.append(f"fun.noxa.fi + hood.fun: <b>{len(hood_tokens)} token(s)</b>")
+                    if hood_tokens:
+                        t = hood_tokens[0]
+                        lines.append(f"  └ Latest: {t['name']} ({t['symbol']}) <code>{t['contract_address'][:14]}…</code>")
+                except Exception as exc:
+                    lines.append(f"fun.noxa.fi / hood.fun: ❌ {exc}")
+                try:
+                    gm_tokens = gmgn.get_new_pairs()
+                    lines.append(f"GMGN: <b>{len(gm_tokens)} token(s)</b>")
+                    if gm_tokens:
+                        t = gm_tokens[0]
+                        lines.append(f"  └ Latest: {t['name']} ({t['symbol']}) <code>{t['contract_address'][:14]}…</code>")
+                except Exception as exc:
+                    lines.append(f"GMGN: ❌ {exc}")
+                try:
+                    dex_tokens = dexscreener.get_new_pairs()
+                    lines.append(f"DexScreener: <b>{len(dex_tokens)} token(s)</b>")
+                    if dex_tokens:
+                        t = dex_tokens[0]
+                        lines.append(f"  └ Latest: {t['name']} ({t['symbol']}) <code>{t['contract_address'][:14]}…</code>")
+                except Exception as exc:
+                    lines.append(f"DexScreener: ❌ {exc}")
+                lines.append("")
+                try:
+                    scan_on = redis_client.is_scanning_enabled()
+                    watch_on = redis_client.is_watch_enabled()
+                    filter_on = redis_client.is_watch_filter_enabled()
+                    lines.append(f"Safety scan: {'ON ✅' if scan_on else 'OFF ⏸'}")
+                    lines.append(f"Watch mode: {'ON ✅' if watch_on else 'OFF ⏸'}")
+                    lines.append(f"Watch filter: {'ON ✅' if filter_on else 'OFF'}")
+                except Exception as exc:
+                    lines.append(f"Redis: ❌ {exc}")
+                tg.send_text(chat_id, "\n".join(lines))
 
             elif cmd == "/help":
                 tg.send_text(chat_id, HELP_TEXT, keyboard=MAIN_KEYBOARD)

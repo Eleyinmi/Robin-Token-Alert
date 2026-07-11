@@ -11,7 +11,7 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-NEW_PAIR_MAX_AGE_SECONDS = 90
+NEW_PAIR_MAX_AGE_SECONDS = 150
 
 SOURCES = [
     {

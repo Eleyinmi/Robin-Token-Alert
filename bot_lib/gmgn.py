@@ -16,7 +16,7 @@ GMGN_BASE = "https://gmgn.ai"
 GMGN_CHAIN = "rbn"
 
 # How long a token can be before it's not "new" (seconds)
-NEW_PAIR_MAX_AGE_SECONDS = 90
+NEW_PAIR_MAX_AGE_SECONDS = 150
 
 
 def get_gmgn_url(contract_address: str) -> str:

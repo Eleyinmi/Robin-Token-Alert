@@ -256,6 +256,8 @@ def set_bot_commands() -> bool:
         {"command": "removechannel", "description": "Remove this chat from broadcast list"},
         {"command": "status",        "description": "Show full status"},
         {"command": "scan",          "description": "Safety check any contract: /scan 0x..."},
+        {"command": "test",          "description": "Confirm bot can send messages here"},
+        {"command": "diag",          "description": "Check token sources and Redis state"},
         {"command": "help",          "description": "Show all commands"},
     ]
     try:

@@ -15,19 +15,20 @@ NEW_PAIR_MAX_AGE_SECONDS = 90
 
 SOURCES = [
     {
-        "name": "hood.fun",
-        "base": "https://hood.fun",
+        "name": "fun.noxa.fi",
+        "base": "https://fun.noxa.fi",
         "endpoints": [
             "/api/tokens?sort=createTime&order=desc&limit=50",
             "/api/coins?sort=created&order=desc&limit=50",
             "/api/v1/tokens/latest?limit=50",
             "/api/tokens/new?limit=50",
+            "/api/token/list?sort=created&limit=50",
         ],
         "chain": "rbn",
     },
     {
-        "name": "noxa.fun",
-        "base": "https://noxa.fun",
+        "name": "hood.fun",
+        "base": "https://hood.fun",
         "endpoints": [
             "/api/tokens?sort=createTime&order=desc&limit=50",
             "/api/coins?sort=created&order=desc&limit=50",

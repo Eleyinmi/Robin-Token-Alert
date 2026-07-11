@@ -96,12 +96,12 @@ def set_watch_enabled(enabled):
 
 
 def is_watch_filter_enabled():
-    """When True, watch alerts only fire for tokens with MC<10k AND social profile."""
+    """When True, watch alerts only fire for tokens with MC in range AND social profile."""
     try:
         result = _call(["GET", "watch_filter_enabled"])
         value = result.get("result")
         if value is None:
-            return False  # Filter OFF by default
+            return False
         return value.lower() == "true"
     except Exception as exc:
         logger.error("Redis GET watch_filter_enabled failed: %s", exc)
@@ -113,6 +113,28 @@ def set_watch_filter_enabled(enabled):
         _call(["SET", "watch_filter_enabled", "true" if enabled else "false"])
     except Exception as exc:
         logger.error("Redis SET watch_filter_enabled failed: %s", exc)
+        raise
+
+
+def get_watch_mc_range() -> tuple[float, float]:
+    """Return (min_mc, max_mc) for the watch filter. Defaults: 0 to 10,000."""
+    try:
+        min_result = _call(["GET", "watch_mc_min"])
+        max_result = _call(["GET", "watch_mc_max"])
+        mc_min = float(min_result.get("result") or 0)
+        mc_max = float(max_result.get("result") or 10_000)
+        return mc_min, mc_max
+    except Exception as exc:
+        logger.error("Redis GET watch_mc_range failed: %s", exc)
+        return 0.0, 10_000.0
+
+
+def set_watch_mc_range(mc_min: float, mc_max: float):
+    try:
+        _call(["SET", "watch_mc_min", str(mc_min)])
+        _call(["SET", "watch_mc_max", str(mc_max)])
+    except Exception as exc:
+        logger.error("Redis SET watch_mc_range failed: %s", exc)
         raise
 
 

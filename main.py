@@ -208,13 +208,14 @@ def process_commands():
                 current = redis_client.is_watch_filter_enabled()
                 new_state = not current
                 redis_client.set_watch_filter_enabled(new_state)
+                mc_min, mc_max = redis_client.get_watch_mc_range()
                 if new_state:
                     msg_text = (
                         "🔽 <b>Watch filter ON</b>\n\n"
                         "Watch alerts will only fire for tokens that have:\n"
-                        "• Market cap under <b>$10,000</b>\n"
+                        f"• Market cap between <b>${mc_min:,.0f}</b> and <b>${mc_max:,.0f}</b>\n"
                         "• A website or Twitter/X account\n\n"
-                        "This reduces noise and focuses on early-stage launches with a social presence."
+                        "Use /setmc to change the MC range. Example: <code>/setmc 0 50000</code>"
                     )
                     kb = WATCH_CONTROL_FILTER_ON_KEYBOARD
                 else:
@@ -224,6 +225,40 @@ def process_commands():
                     )
                     kb = WATCH_CONTROL_KEYBOARD
                 tg.send_text(chat_id, msg_text, keyboard=kb)
+
+            elif cmd == "/setmc":
+                if not is_owner:
+                    continue
+                try:
+                    if len(args) == 1:
+                        # /setmc 50000 → sets max only, min stays 0
+                        mc_min, mc_max = 0.0, float(args[0].replace(",", "").replace("k", "000").replace("K", "000"))
+                    elif len(args) == 2:
+                        # /setmc 1000 50000 → set min and max
+                        mc_min = float(args[0].replace(",", "").replace("k", "000").replace("K", "000"))
+                        mc_max = float(args[1].replace(",", "").replace("k", "000").replace("K", "000"))
+                    else:
+                        tg.send_text(
+                            chat_id,
+                            "Usage:\n"
+                            "<code>/setmc 10000</code> — notify when MC is under $10,000\n"
+                            "<code>/setmc 1000 50000</code> — notify when MC is between $1k and $50k\n\n"
+                            "You can use <code>k</code> shorthand: <code>/setmc 1k 50k</code>"
+                        )
+                        continue
+                    if mc_min >= mc_max:
+                        tg.send_text(chat_id, "❌ Min MC must be less than max MC.")
+                        continue
+                    redis_client.set_watch_mc_range(mc_min, mc_max)
+                    tg.send_text(
+                        chat_id,
+                        f"✅ <b>MC range updated</b>\n\n"
+                        f"Watch filter will now match tokens with market cap between "
+                        f"<b>${mc_min:,.0f}</b> and <b>${mc_max:,.0f}</b>.\n\n"
+                        f"<i>Filter must also be ON (/watchfilter) for this to take effect.</i>"
+                    )
+                except ValueError:
+                    tg.send_text(chat_id, "❌ Invalid number. Example: <code>/setmc 1000 50000</code>")
 
             elif cmd == "/addchannel":
                 if not is_owner:
@@ -367,13 +402,14 @@ def run_scan():
             should_alert = True
             if watch_filter:
                 mc = token.get("market_cap_usd", 0) or 0
-                passes_mc = mc > 0 and mc < 10_000
+                mc_min, mc_max = redis_client.get_watch_mc_range()
+                passes_mc = mc > 0 and mc_min <= mc <= mc_max
                 passes_social = _has_social_profile(token)
                 should_alert = passes_mc and passes_social
                 if not should_alert:
                     logger.debug(
-                        "Watch filter skipped %s — mc=$%.0f passes_mc=%s social=%s",
-                        contract, mc, passes_mc, passes_social,
+                        "Watch filter skipped %s — mc=$%.0f range=$%.0f-$%.0f passes_mc=%s social=%s",
+                        contract, mc, mc_min, mc_max, passes_mc, passes_social,
                     )
 
             try:

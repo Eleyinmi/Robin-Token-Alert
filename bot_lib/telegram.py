@@ -305,32 +305,54 @@ def send_text(chat_id: str, text: str, keyboard: dict = None) -> bool:
 
 def _send_message(chat_id: str, text: str, reply_markup: dict = None) -> bool:
     """
-    Call Telegram sendMessage API.
+    Call Telegram sendMessage API. Automatically splits messages longer than
+    4000 characters across multiple sends (Telegram's limit is 4096).
     Returns True on success, False on any failure.
     """
     if not TELEGRAM_BOT_TOKEN:
         logger.error("TELEGRAM_BOT_TOKEN not configured")
         return False
 
-    url = f"{TELEGRAM_API_BASE}/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True,
-    }
-    if reply_markup:
-        import json
-        payload["reply_markup"] = json.dumps(reply_markup)
+    # Split long messages at newline boundaries to stay under 4000 chars
+    MAX_LEN = 4000
+    chunks = []
+    if len(text) <= MAX_LEN:
+        chunks = [text]
+    else:
+        lines = text.split("\n")
+        current = ""
+        for line in lines:
+            addition = (line + "\n")
+            if len(current) + len(addition) > MAX_LEN:
+                if current:
+                    chunks.append(current.rstrip())
+                current = addition
+            else:
+                current += addition
+        if current.strip():
+            chunks.append(current.rstrip())
 
-    try:
-        resp = requests.post(url, json=payload, timeout=10)
-        if not resp.ok:
-            logger.error(
-                "Telegram sendMessage failed: %s — %s", resp.status_code, resp.text
-            )
-            return False
-        return True
-    except requests.RequestException as exc:
-        logger.error("Telegram sendMessage request failed: %s", exc)
-        return False
+    url = f"{TELEGRAM_API_BASE}/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    success = True
+    for i, chunk in enumerate(chunks):
+        payload = {
+            "chat_id": chat_id,
+            "text": chunk,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        }
+        # Only attach keyboard to the last chunk
+        if reply_markup and i == len(chunks) - 1:
+            import json
+            payload["reply_markup"] = json.dumps(reply_markup)
+        try:
+            resp = requests.post(url, json=payload, timeout=10)
+            if not resp.ok:
+                logger.error(
+                    "Telegram sendMessage failed: %s — %s", resp.status_code, resp.text
+                )
+                success = False
+        except requests.RequestException as exc:
+            logger.error("Telegram sendMessage request failed: %s", exc)
+            success = False
+    return success

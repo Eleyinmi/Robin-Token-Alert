@@ -370,7 +370,7 @@ def process_commands():
 
                 # ── 1. DexScreener: what chain IDs are actually available? ──
                 try:
-                    r = _req.get("https://api.dexscreener.com/token-profiles/latest/v1", timeout=10)
+                    r = _req.get("https://api.dexscreener.com/token-profiles/latest/v1", timeout=7)
                     lines.append(f"DexScreener profiles: HTTP {r.status_code}")
                     if r.ok:
                         profiles = r.json() if isinstance(r.json(), list) else []
@@ -387,7 +387,7 @@ def process_commands():
 
                 # ── 2. DexScreener search for robinhood ──
                 try:
-                    r = _req.get("https://api.dexscreener.com/latest/dex/search?q=robinhood", timeout=10)
+                    r = _req.get("https://api.dexscreener.com/latest/dex/search?q=robinhood", timeout=7)
                     if r.ok:
                         pairs = r.json().get("pairs") or []
                         chains = list({p.get("chainId") for p in pairs if p.get("chainId")})[:5]
@@ -405,7 +405,7 @@ def process_commands():
                             f"https://gmgn.ai/defi/quotation/v1/pairs/{gchain}/new_pairs",
                             params={"limit": 5, "orderby": "open_timestamp", "direction": "desc"},
                             headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
-                            timeout=8,
+                            timeout=5,
                         )
                         if r.ok:
                             pairs = (r.json().get("data") or {}).get("pairs") or r.json().get("pairs") or []
@@ -431,7 +431,7 @@ def process_commands():
                 for ep in noxa_endpoints:
                     try:
                         r = _req.get("https://fun.noxa.fi" + ep,
-                                     headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"}, timeout=6)
+                                     headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"}, timeout=4)
                         ct = r.headers.get("Content-Type", "?")
                         is_json = "json" in ct or r.text.strip()[:1] in ("{", "[")
                         short_body = r.text.strip()[:120].replace("\n", " ")
@@ -465,7 +465,7 @@ def process_commands():
                 for ep in hood_endpoints:
                     try:
                         r = _req.get("https://hood.fun" + ep,
-                                     headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"}, timeout=6)
+                                     headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"}, timeout=4)
                         ct = r.headers.get("Content-Type", "?")
                         is_json = "json" in ct or r.text.strip()[:1] in ("{", "[")
                         lines.append(f"hood{ep[:28]}: {r.status_code} {'JSON' if is_json else 'HTML/404'}")

@@ -139,18 +139,27 @@ def process_commands():
         offset = update_id + 1
 
         callback = update.get("callback_query")
+        is_channel_post = False
         if callback:
             chat_id = str(callback.get("message", {}).get("chat", {}).get("id", ""))
             user_id = str(callback.get("from", {}).get("id", ""))
             text = callback.get("data", "")
             tg.answer_callback_query(callback.get("id", ""))
         else:
-            msg = update.get("message") or update.get("edited_message")
+            # channel_post = command sent inside a Telegram channel (bot is admin)
+            # message / edited_message = private/group chat
+            msg = (
+                update.get("message")
+                or update.get("edited_message")
+                or update.get("channel_post")
+            )
             if not msg:
                 continue
             chat_id = str(msg.get("chat", {}).get("id", ""))
-            user_id = str(msg.get("from", {}).get("id", ""))
+            # channel posts have no "from" — treat as owner if it's /addchannel or /removechannel
+            user_id = str((msg.get("from") or {}).get("id", ""))
             text = (msg.get("text") or "").strip()
+            is_channel_post = update.get("channel_post") is not None
 
         if not text.startswith("/"):
             continue
@@ -158,7 +167,11 @@ def process_commands():
         parts = text.split()
         cmd = parts[0].split("@")[0].lower()
         args = parts[1:]
-        is_owner = OWNER_TELEGRAM_ID and user_id == str(OWNER_TELEGRAM_ID)
+        # Channel posts for /addchannel or /removechannel are always trusted
+        # (whoever controls the channel controls whether it gets alerts)
+        is_owner = (OWNER_TELEGRAM_ID and user_id == str(OWNER_TELEGRAM_ID)) or (
+            is_channel_post and cmd in ("/addchannel", "/removechannel")
+        )
 
         try:
             if cmd == "/start":
@@ -351,43 +364,112 @@ def process_commands():
             elif cmd == "/diag":
                 if not is_owner:
                     continue
-                tg.send_text(chat_id, "🔍 <b>Running source diagnostics…</b>\n\n<i>Checking all token sources. This may take 10–15 seconds.</i>")
-                from bot_lib import hoodfun, gmgn, dexscreener
-                lines = ["<b>Token Source Diagnostics</b>", ""]
+                import requests as _req
+                tg.send_text(chat_id, "🔍 <b>Running diagnostics…</b>\n<i>Probing APIs — takes ~20 seconds.</i>")
+                lines = ["<b>Deep Diagnostics</b>", ""]
+
+                # ── 1. DexScreener: what chain IDs are actually available? ──
                 try:
-                    hood_tokens = hoodfun.get_new_pairs()
-                    lines.append(f"fun.noxa.fi + hood.fun: <b>{len(hood_tokens)} token(s)</b>")
-                    if hood_tokens:
-                        t = hood_tokens[0]
-                        lines.append(f"  └ Latest: {t['name']} ({t['symbol']}) <code>{t['contract_address'][:14]}…</code>")
+                    r = _req.get("https://api.dexscreener.com/token-profiles/latest/v1", timeout=10)
+                    lines.append(f"DexScreener profiles: HTTP {r.status_code}")
+                    if r.ok:
+                        profiles = r.json() if isinstance(r.json(), list) else []
+                        chain_counts: dict = {}
+                        for p in profiles:
+                            c = p.get("chainId", "?")
+                            chain_counts[c] = chain_counts.get(c, 0) + 1
+                        top = sorted(chain_counts.items(), key=lambda x: -x[1])[:8]
+                        lines.append("  Chains seen: " + ", ".join(f"{c}({n})" for c, n in top))
+                        rbn_count = chain_counts.get("rbn", 0)
+                        lines.append(f"  'rbn' entries: {rbn_count} {'✅' if rbn_count else '❌ wrong chain ID!'}")
                 except Exception as exc:
-                    lines.append(f"fun.noxa.fi / hood.fun: ❌ {exc}")
+                    lines.append(f"DexScreener profiles: ❌ {exc}")
+
+                # ── 2. DexScreener search for robinhood ──
                 try:
-                    gm_tokens = gmgn.get_new_pairs()
-                    lines.append(f"GMGN: <b>{len(gm_tokens)} token(s)</b>")
-                    if gm_tokens:
-                        t = gm_tokens[0]
-                        lines.append(f"  └ Latest: {t['name']} ({t['symbol']}) <code>{t['contract_address'][:14]}…</code>")
+                    r = _req.get("https://api.dexscreener.com/latest/dex/search?q=robinhood", timeout=10)
+                    if r.ok:
+                        pairs = r.json().get("pairs") or []
+                        chains = list({p.get("chainId") for p in pairs if p.get("chainId")})[:5]
+                        lines.append(f"DexScreener search 'robinhood': {len(pairs)} pairs, chains: {chains or 'none'}")
+                    else:
+                        lines.append(f"DexScreener search: HTTP {r.status_code}")
                 except Exception as exc:
-                    lines.append(f"GMGN: ❌ {exc}")
-                try:
-                    dex_tokens = dexscreener.get_new_pairs()
-                    lines.append(f"DexScreener: <b>{len(dex_tokens)} token(s)</b>")
-                    if dex_tokens:
-                        t = dex_tokens[0]
-                        lines.append(f"  └ Latest: {t['name']} ({t['symbol']}) <code>{t['contract_address'][:14]}…</code>")
-                except Exception as exc:
-                    lines.append(f"DexScreener: ❌ {exc}")
+                    lines.append(f"DexScreener search: ❌ {exc}")
+
+                # ── 3. GMGN new pairs (try rbn + robin + robinhood) ──
+                lines.append("")
+                for gchain in ("rbn", "robin", "robinhood"):
+                    try:
+                        r = _req.get(
+                            f"https://gmgn.ai/defi/quotation/v1/pairs/{gchain}/new_pairs",
+                            params={"limit": 5, "orderby": "open_timestamp", "direction": "desc"},
+                            headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
+                            timeout=8,
+                        )
+                        if r.ok:
+                            pairs = (r.json().get("data") or {}).get("pairs") or r.json().get("pairs") or []
+                            lines.append(f"GMGN chain '{gchain}': HTTP {r.status_code} → {len(pairs)} pairs {'✅' if pairs else ''}")
+                            if pairs:
+                                break
+                        else:
+                            lines.append(f"GMGN chain '{gchain}': HTTP {r.status_code}")
+                    except Exception as exc:
+                        lines.append(f"GMGN chain '{gchain}': ❌ {exc}")
+
+                # ── 4. fun.noxa.fi — try a few endpoints ──
+                lines.append("")
+                noxa_endpoints = [
+                    "/api/tokens?sort=createTime&order=desc&limit=5",
+                    "/api/coins?limit=5",
+                    "/api/v1/tokens/latest?limit=5",
+                    "/api/token/list?limit=5",
+                ]
+                noxa_found = False
+                for ep in noxa_endpoints:
+                    try:
+                        r = _req.get("https://fun.noxa.fi" + ep,
+                                     headers={"User-Agent": "Mozilla/5.0"}, timeout=6)
+                        lines.append(f"fun.noxa.fi{ep[:30]}: HTTP {r.status_code}")
+                        if r.ok and r.text.strip().startswith(("{", "[")):
+                            data = r.json()
+                            items = data if isinstance(data, list) else (data.get("tokens") or data.get("coins") or data.get("data") or data.get("items") or [])
+                            lines.append(f"  → {len(items)} item(s) {'✅' if items else ''}")
+                            if items:
+                                noxa_found = True
+                                break
+                    except Exception as exc:
+                        lines.append(f"fun.noxa.fi{ep[:30]}: ❌ {exc}")
+                if not noxa_found:
+                    lines.append("  fun.noxa.fi: no working endpoint found yet")
+
+                # ── 5. hood.fun ──
+                lines.append("")
+                for ep in ["/api/tokens?sort=createTime&order=desc&limit=5", "/api/coins?limit=5"]:
+                    try:
+                        r = _req.get("https://hood.fun" + ep,
+                                     headers={"User-Agent": "Mozilla/5.0"}, timeout=6)
+                        lines.append(f"hood.fun{ep[:30]}: HTTP {r.status_code}")
+                        if r.ok and r.text.strip().startswith(("{", "[")):
+                            data = r.json()
+                            items = data if isinstance(data, list) else (data.get("tokens") or data.get("coins") or data.get("data") or [])
+                            lines.append(f"  → {len(items)} item(s) {'✅' if items else ''}")
+                    except Exception as exc:
+                        lines.append(f"hood.fun{ep[:30]}: ❌ {exc}")
+
+                # ── 6. Redis state ──
                 lines.append("")
                 try:
                     scan_on = redis_client.is_scanning_enabled()
                     watch_on = redis_client.is_watch_enabled()
                     filter_on = redis_client.is_watch_filter_enabled()
+                    mc_min, mc_max = redis_client.get_watch_mc_range()
                     lines.append(f"Safety scan: {'ON ✅' if scan_on else 'OFF ⏸'}")
                     lines.append(f"Watch mode: {'ON ✅' if watch_on else 'OFF ⏸'}")
-                    lines.append(f"Watch filter: {'ON ✅' if filter_on else 'OFF'}")
+                    lines.append(f"Filter: {'ON' if filter_on else 'OFF'} (${mc_min:,.0f}–${mc_max:,.0f})")
                 except Exception as exc:
                     lines.append(f"Redis: ❌ {exc}")
+
                 tg.send_text(chat_id, "\n".join(lines))
 
             elif cmd == "/help":

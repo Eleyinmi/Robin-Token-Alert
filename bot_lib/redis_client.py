@@ -122,11 +122,11 @@ def get_watch_mc_range() -> tuple[float, float]:
         min_result = _call(["GET", "watch_mc_min"])
         max_result = _call(["GET", "watch_mc_max"])
         mc_min = float(min_result.get("result") or 0)
-        mc_max = float(max_result.get("result") or 10_000)
+        mc_max = float(max_result.get("result") or 20_000)
         return mc_min, mc_max
     except Exception as exc:
         logger.error("Redis GET watch_mc_range failed: %s", exc)
-        return 0.0, 10_000.0
+        return 0.0, 20_000.0
 
 
 def set_watch_mc_range(mc_min: float, mc_max: float):
